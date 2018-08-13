@@ -38,8 +38,6 @@ namespace BitPayAPI
         private String _baseUrl = BITPAY_URL;
         private EcKey _ecKey = null;
         private String _identity = "";
-        private long _nonce = DateTime.Now.Ticks / 1000;
-        private bool _disableNonce = false;
         private String _clientName = "";
         private Dictionary<string, string> _tokenCache; // {facade, token}
 
@@ -99,15 +97,6 @@ namespace BitPayAPI
         }
 
         /// <summary>
-        /// Disable use of the nonce for this client.  When disabled, the nonce will not be sent to the server in subsequent requests.
-        /// </summary>
-        public bool DisableNonce
-        {
-            get { return _disableNonce; }
-            set { _disableNonce = DisableNonce; }
-        }
-
-        /// <summary>
         /// Authorize (pair) this client with the server using the specified pairing code.
         /// </summary>
         /// <param name="pairingCode">A code obtained from the server; typically from bitpay.com/api-tokens.</param>
@@ -116,7 +105,6 @@ namespace BitPayAPI
             Token token = new Token();
             token.Id = _identity;
             token.Guid = Guid.NewGuid().ToString();
-            token.Nonce = NextNonce;
             token.PairingCode = pairingCode;
             token.Label = _clientName;
             String json = JsonConvert.SerializeObject(token);
@@ -124,7 +112,7 @@ namespace BitPayAPI
             List<Token> tokens = JsonConvert.DeserializeObject<List<Token>>(this.responseToJsonString(response));
             foreach (Token t in tokens)
             {
-                _tokenCache.Add(t.Facade, t.Value);
+                cacheToken(t.Facade, t.Value);
             }
         }
         
@@ -138,7 +126,6 @@ namespace BitPayAPI
             Token token = new Token();
             token.Id = _identity;
             token.Guid = Guid.NewGuid().ToString();
-            token.Nonce = NextNonce;
             token.Facade = facade;
             token.Count = 1;
             token.Label = _clientName;
@@ -150,7 +137,7 @@ namespace BitPayAPI
             {
                 throw new BitPayException("Error - failed to get token resource; expected 1 token, got " + tokens.Count);
             }
-            _tokenCache.Add(tokens[0].Facade, tokens[0].Value);
+            cacheToken(tokens[0].Facade, tokens[0].Value);
             return tokens[0].PairingCode;
         }
 
@@ -171,30 +158,42 @@ namespace BitPayAPI
         /// <returns>A new invoice object returned from the server.</returns>
         public Invoice createInvoice(Invoice invoice, String facade = FACADE_POS)
         {
-            Encoding ascii = Encoding.ASCII;
-            Encoding unicode = Encoding.Unicode;
             invoice.Token = this.getAccessToken(facade);
             invoice.Guid = Guid.NewGuid().ToString();
-            invoice.Nonce = NextNonce;
             String json = JsonConvert.SerializeObject(invoice);
-            byte[] unicodeBytes = unicode.GetBytes(json);
-            byte[] asciiBytes = Encoding.Convert(unicode, ascii, unicodeBytes);
-            char[] asciiChars = new char[ascii.GetCharCount(asciiBytes, 0, asciiBytes.Length)];
-            ascii.GetChars(asciiBytes, 0, asciiBytes.Length, asciiChars, 0);
-            string asciiString = new string(asciiChars);
-            HttpResponseMessage response = this.postWithSignature("invoices", asciiString);
+            HttpResponseMessage response = this.postWithSignature("invoices", json);
             JsonConvert.PopulateObject(this.responseToJsonString(response), invoice);
+
+            // Track the token for this invoice
+            cacheToken(invoice.Id, invoice.Token);
+
             return invoice;
         }
 
         /// <summary>
-        /// Retrieve an invoice by id using the public facade.
+        /// Retrieve an invoice by id and token.
         /// </summary>
         /// <param name="invoiceId">The id of the requested invoice.</param>
         /// <returns>The invoice object retrieved from the server.</returns>
-        public Invoice getInvoice(String invoiceId)
+        public Invoice getInvoice(String invoiceId, String facade = FACADE_POS)
         {
-            HttpResponseMessage response = this.get("invoices/" + invoiceId);
+            // Provide the merchant token when the merchant facade is being used.
+            // GET/invoices expects the merchant token and not the merchant/invoice token.
+            Dictionary<string, string> parameters = null;
+            if (facade == FACADE_MERCHANT)
+            {
+                try
+                {
+                    parameters = new Dictionary<string, string>();
+                    parameters.Add("token", getAccessToken(FACADE_MERCHANT));
+                }
+                catch (BitPayException)
+                {
+                    // No token for invoice.
+                    parameters = null;
+                }
+            }
+            HttpResponseMessage response = this.get("invoices/" + invoiceId, parameters);
             return JsonConvert.DeserializeObject<Invoice>(this.responseToJsonString(response));
         }
 
@@ -243,6 +242,161 @@ namespace BitPayAPI
             return new Ledger(entries);
         }
 
+        /// <summary>
+        /// Submit a BitPay Payout batch.
+        /// </summary>
+        /// <param name="batch">A PayoutBatch object with request parameters defined.</param>
+        /// <returns>A BitPay generated PayoutBatch object.</param>
+        public PayoutBatch submitPayoutBatch(PayoutBatch batch)
+        {
+            batch.Token = this.getAccessToken(FACADE_PAYROLL);
+            batch.Guid = Guid.NewGuid().ToString();
+            String json = JsonConvert.SerializeObject(batch);
+            HttpResponseMessage response = this.postWithSignature("payouts", json);
+
+            // To avoid having to merge instructions in the response with those we sent, we just remove the instructions
+            // we sent and replace with those in the response.
+            batch.Instructions = new List<PayoutInstruction>();
+
+            JsonConvert.PopulateObject(this.responseToJsonString(response), batch, new JsonSerializerSettings
+                {
+                    NullValueHandling = NullValueHandling.Ignore
+                });
+
+            // Track the token for this batch
+            cacheToken(batch.Id, batch.Token);
+
+            return batch;
+        }
+
+        /// <summary>
+        /// Retrieve a collection of BitPay payout batches.
+        /// </summary>
+        /// <returns>A list of BitPay PayoutBatch objects.</param>
+        public List<PayoutBatch> getPayoutBatches()
+        {
+            Dictionary<String, String> parameters = this.getParams();
+            parameters.Add("token", this.getAccessToken(FACADE_PAYROLL));
+            HttpResponseMessage response = this.get("payouts", parameters);
+            return JsonConvert.DeserializeObject<List<PayoutBatch>>(this.responseToJsonString(response), new JsonSerializerSettings
+                {
+                    NullValueHandling = NullValueHandling.Ignore
+                });
+        }
+    
+        /// <summary>
+        /// Retrieve a BitPay payout batch by batch id using.  The client must have been previously authorized for the payroll facade.
+        /// </summary>
+        /// <param name="batchId">The id of the batch to retrieve.</param>
+        /// <returns>A BitPay PayoutBatch object.</param>
+        public PayoutBatch getPayoutBatch(String batchId) {
+            Dictionary<string, string> parameters = null;
+            try
+            {
+                parameters = new Dictionary<string, string>();
+                parameters.Add("token", getAccessToken(FACADE_PAYROLL));
+            }
+            catch (BitPayException)
+            {
+                // No token for batch.
+                parameters = null;
+            }
+            HttpResponseMessage response = this.get("payouts/" + batchId, parameters);
+            return JsonConvert.DeserializeObject<PayoutBatch>(this.responseToJsonString(response), new JsonSerializerSettings
+                {
+                    NullValueHandling = NullValueHandling.Ignore
+                });
+        }
+
+        /// <summary>
+        /// Cancel a BitPay Payout batch.
+        /// </summary>
+        /// <param name="batchId">The id of the batch to cancel.</param>
+        /// <returns> A BitPay generated PayoutBatch object.</param>
+        public PayoutBatch cancelPayoutBatch(String batchId) {
+            PayoutBatch b = getPayoutBatch(batchId);
+            
+            Dictionary<string, string> parameters = null;
+            try
+            {
+                parameters = new Dictionary<string, string>();
+                parameters.Add("token", b.Token);
+            }
+            catch (BitPayException)
+            {
+                // No token for batch.
+                parameters = null;
+            }
+            HttpResponseMessage response = this.delete("payouts/" + batchId, parameters);
+            return JsonConvert.DeserializeObject<PayoutBatch>(this.responseToJsonString(response), new JsonSerializerSettings
+                {
+                    NullValueHandling = NullValueHandling.Ignore
+                });
+        }
+
+        /// <summary>
+        /// Retrieves settlement reports for the calling merchant filtered by query. The `limit` and `offset` parameters specify pages for large query sets.
+        /// </summary>
+        /// <param name="currency">The three digit currency string for the ledger to retrieve.</param>
+        /// <param name="dateStart">The start date for the query.</param>
+        /// <param name="dateEnd">The end date for the query.</param>
+        /// <param name="status">Can be `processing`, `completed`, or `failed`.</param>
+        /// <param name="limit">Maximum number of settlements to retrieve.</param>
+        /// <param name="offset">Offset for paging</param>
+        /// <returns>A list of BitPay Settlement objects</returns>
+        public List<Settlement> getSettlements(string currency, DateTime dateStart, DateTime dateEnd, string status = "", int limit = 100, int offset = 0)
+        {
+            var parameters = new Dictionary<string, string>
+            {
+                { "token", getAccessToken(FACADE_MERCHANT) },
+                { "startDate", $"{dateStart.ToShortDateString()}" },
+                { "endDate", $"{dateEnd.ToShortDateString()}" },
+                { "currency", currency },
+                { "status", status },
+                { "limit", $"{limit}" },
+                { "offset", $"{offset}" }
+            };
+
+            HttpResponseMessage response = get("settlements", parameters);
+            return JsonConvert.DeserializeObject<List<Settlement>>(responseToJsonString(response));
+        }
+
+        /// <summary>
+        /// Retrieves a summary of the specified settlement.
+        /// </summary>
+        /// <param name="settlementId">Settlement Id</param>
+        /// <returns>A BitPay Settlement object.</returns>
+        public Settlement getSettlement(string settlementId)
+        {
+            var parameters = new Dictionary<string, string>
+            {
+                { "token", getAccessToken(FACADE_MERCHANT) }
+            };
+
+            HttpResponseMessage response = get($"settlements/{settlementId}", parameters);
+            return JsonConvert.DeserializeObject<Settlement>(responseToJsonString(response));
+        }
+
+        /// <summary>
+        /// Gets a detailed reconciliation report of the activity within the settlement period
+        /// </summary>
+        /// <param name="settlement">Settlement to generate report for.</param>
+        /// <returns>A detailed BitPay Settlement object.</returns>
+        public Settlement getSettlementReconciliationReport(Settlement settlement)
+        {
+            var parameters = new Dictionary<string, string>
+            {
+                { "token", settlement.Token }
+            };
+
+            HttpResponseMessage response = get($"settlements/{settlement.Id}/reconciliationReport", parameters);
+            return JsonConvert.DeserializeObject<Settlement>(responseToJsonString(response));
+        }
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
         private void initKeys()
         {
             if (KeyUtils.privateKeyExists())
@@ -250,7 +404,7 @@ namespace BitPayAPI
                 _ecKey = KeyUtils.loadEcKey();
 
                 // Alternatively, load your private key from a location you specify.
-                // _ecKey = KeyUtils.createEcKeyFromHexStringFile("C:\\Users\\key.priv");
+                //_ecKey = KeyUtils.createEcKeyFromHexStringFile("C:\\Users\\Andy\\Documents\\private-key.txt");
             }
             else
             {
@@ -263,22 +417,6 @@ namespace BitPayAPI
         {
             // Identity in this implementation is defined to be the SIN.
             _identity = KeyUtils.deriveSIN(_ecKey);
-        }
-
-        private long NextNonce
-        {
-            get
-            {
-                if (!DisableNonce)
-                {
-                    _nonce++;
-                }
-                else
-                {
-                    _nonce = 0;  // Nonce must be 0 when it has been disabled (0 value prevents serialization)
-                }
-                return _nonce;
-            }
         }
 
         private Dictionary<string, string> responseToTokenCache(HttpResponseMessage response)
@@ -303,7 +441,7 @@ namespace BitPayAPI
                     {
                         if (!_tokenCache.ContainsKey(key))
                         {
-                            _tokenCache.Add(key, obj[i][key]);
+                            cacheToken(key, obj[i][key]);
                         }
                     }
                 }
@@ -321,6 +459,11 @@ namespace BitPayAPI
 
         private void clearAccessTokenCache() {
             _tokenCache = new Dictionary<string, string>();
+        }
+
+        private void cacheToken(String key, String token)
+        {
+            _tokenCache.Add(key, token);
         }
 
         private bool tryGetAccessTokens()
@@ -357,19 +500,18 @@ namespace BitPayAPI
             return _tokenCache.Count;
         }
 
-        private String getAccessToken(String facade)
+        private String getAccessToken(String key)
         {
-            if (!_tokenCache.ContainsKey(facade))
+            if (!_tokenCache.ContainsKey(key))
             {
-                throw new BitPayException("Error: You do not have access to facade: " + facade);
+                throw new BitPayException("Error: You do not have access to facade: " + key);
             }
-            return _tokenCache[facade];
+            return _tokenCache[key];
         }
 
         private Dictionary<string, string> getParams()
         {
             Dictionary<string, string> parameters = new Dictionary<string, string>();
-            parameters.Add("nonce", NextNonce + "");
             return parameters;
         }
 
@@ -403,6 +545,37 @@ namespace BitPayAPI
             }
         }
 
+        private HttpResponseMessage delete(String uri, Dictionary<string, string> parameters = null)
+        {
+            try
+            {
+                String fullURL = _baseUrl + uri;
+                _httpClient.DefaultRequestHeaders.Clear();
+                _httpClient.DefaultRequestHeaders.Add("x-accept-version", BITPAY_API_VERSION);
+                _httpClient.DefaultRequestHeaders.Add("x-bitpay-plugin-info", BITPAY_PLUGIN_INFO);
+
+                if (parameters != null)
+                {
+                    fullURL += "?";
+                    foreach (KeyValuePair<string, string> entry in parameters)
+                    {
+                        fullURL += entry.Key + "=" + entry.Value + "&";
+                    }
+                    fullURL = fullURL.Substring(0, fullURL.Length - 1);
+                    String signature = KeyUtils.sign(_ecKey, fullURL);
+                    _httpClient.DefaultRequestHeaders.Add("x-signature", signature);
+                    _httpClient.DefaultRequestHeaders.Add("x-identity", KeyUtils.bytesToHex(_ecKey.PubKey));
+                }
+
+                var result = _httpClient.DeleteAsync(fullURL).Result;
+                return result;
+            }
+            catch (Exception ex)
+            {
+                throw new BitPayException("Error: " + ex.ToString());
+            }
+        }
+
         private HttpResponseMessage postWithSignature(String uri, String json)
         {
             return this.post(uri, json, true);
@@ -412,7 +585,7 @@ namespace BitPayAPI
         {
             try
             {
-                var bodyContent = new StringContent(json);
+                var bodyContent = new StringContent(this.unicodeToAscii(json));
                 _httpClient.DefaultRequestHeaders.Clear();
                 _httpClient.DefaultRequestHeaders.Add("x-accept-version", BITPAY_API_VERSION);
                 _httpClient.DefaultRequestHeaders.Add("x-bitpay-plugin-info", BITPAY_PLUGIN_INFO);
@@ -492,6 +665,15 @@ namespace BitPayAPI
             System.Net.Security.SslPolicyErrors sslPolicyErrors)
         {
             return true;
+        }
+
+        private String unicodeToAscii(String json)
+        {
+            byte[] unicodeBytes = Encoding.Unicode.GetBytes(json);
+            byte[] asciiBytes = Encoding.Convert(Encoding.Unicode, Encoding.ASCII, unicodeBytes);
+            char[] asciiChars = new char[Encoding.ASCII.GetCharCount(asciiBytes, 0, asciiBytes.Length)];
+            Encoding.ASCII.GetChars(asciiBytes, 0, asciiBytes.Length, asciiChars, 0);
+            return new String(asciiChars);
         }
     }
 }
