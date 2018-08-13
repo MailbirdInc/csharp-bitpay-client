@@ -19,22 +19,25 @@ namespace BitPayAPI
         [JsonProperty(PropertyName = "address2")]
         public string Address2 { get; set; }
 
-        [JsonProperty(PropertyName = "city")]
-        public string City { get; set; }
+        [JsonProperty(PropertyName = "locality")]
+        public string Locality { get; set; }
 
-        [JsonProperty(PropertyName = "state")]
-        public string State { get; set; }
+        [JsonProperty(PropertyName = "region")]
+        public string Region { get; set; }
 
-        [JsonProperty(PropertyName = "zip")]
-        public string zip { get; set; }
+        [JsonProperty(PropertyName = "postalCode")]
+        public string PostalCode { get; set; }
 
         [JsonProperty(PropertyName = "country")]
-        public string country { get; set; }
+        public string Country { get; set; }
 
         [JsonProperty(PropertyName = "email")]
-        public string email { get; set; }
+        public string Email { get; set; }
 
         [JsonProperty(PropertyName = "phone")]
-        public string phone { get; set; }
+        public string Phone { get; set; }
+
+        [JsonProperty(PropertyName = "notify")]
+        public bool Notify { get; set; }
     }
 }

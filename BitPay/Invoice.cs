@@ -93,6 +93,10 @@ namespace BitPayAPI
         public bool FullNotifications { get; set; }
         public bool ShouldSerializeFullNotifications() { return FullNotifications; }
 
+        [JsonProperty(PropertyName = "extendedNotifications")]
+        public bool ExtendedNotifications { get; set; }
+        public bool ShouldSerializeExtendedNotifications() { return ExtendedNotifications; }
+
         [JsonProperty(PropertyName = "notificationEmail")]
         public string NotificationEmail { get; set; }
         public bool ShouldSerializeNotificationEmail() { return !String.IsNullOrEmpty(NotificationEmail); }
@@ -104,6 +108,10 @@ namespace BitPayAPI
         [JsonProperty(PropertyName = "physical")]
         public bool Physical { get; set; }
         public bool ShouldSerializePhysical() { return Physical; }
+
+        [JsonProperty(PropertyName = "buyer")]
+        public Buyer Buyer { get; set; }
+        public bool ShouldSerializeBuyer() { return Buyer != null; }
 
         [JsonProperty(PropertyName = "buyerName")]
         public string BuyerName { get; set; }
@@ -144,45 +152,59 @@ namespace BitPayAPI
         // Response fields
         //
 
+        [JsonProperty(PropertyName = "id")]
         public string Id { get; set; }
         public bool ShouldSerializeId() { return false; }
 
+        [JsonProperty(PropertyName = "úrl")]
         public string Url { get; set; }
         public bool ShouldSerializeUrl() { return false; }
 
+        [JsonProperty(PropertyName = "status")]
         public string Status { get; set; }
         public bool ShouldSerializeStatus() { return false; }
 
-        public double BtcPrice { get; set; }
-        public bool ShouldSerializeBtcPrice() { return false; }
-
+        [JsonProperty(PropertyName = "invoiceTime")]
         public long InvoiceTime { get; set; }
         public bool ShouldSerializeInvoiceTime() { return false; }
 
+        [JsonProperty(PropertyName = "expirationTime")]
         public long ExpirationTime { get; set; }
         public bool ShouldSerializeExpirationTime() { return false; }
-        
+
+        [JsonProperty(PropertyName = "currentTime")]
         public long CurrentTime { get; set; }
         public bool ShouldSerializeCurrentTime() { return false; }
 
+        [JsonProperty(PropertyName = "btcPrice")]
+        public double BtcPrice { get; set; }
+        public bool ShouldSerializeBtcPrice() { return false; }
+
+        [JsonProperty(PropertyName = "btcPaid")]
         public double BtcPaid { get; set; }
         public bool ShouldSerializeBtcPaid() { return false; }
 
+        [JsonProperty(PropertyName = "btcDue")]
         public double BtcDue { get; set; }
         public bool ShouldSerializeBtcDue() { return false; }
 
+        [JsonProperty(PropertyName = "transactions")]
         public List<InvoiceTransaction> Transactions { get; set; }
         public bool ShouldSerializeTransactions() { return false; }
 
+        [JsonProperty(PropertyName = "rate")]
         public double Rate { get; set; }
         public bool ShouldSerializeRate() { return false; }
 
+        [JsonProperty(PropertyName = "exRates")]
         public Dictionary<string, string> ExRates { get; set; }
         public bool ShouldSerializeExRates() { return false; }
 
+        [JsonProperty(PropertyName = "exceptionStatus")]
         public string ExceptionStatus { get; set; }
         public bool ShouldSerializeExceptionStatus() { return false; }
 
+        [JsonProperty(PropertyName = "paymentUrls")]
         public InvoicePaymentUrls PaymentUrls { get; set; }
         public bool ShouldSerializePaymentUrls() { return false; }
 
@@ -192,13 +214,101 @@ namespace BitPayAPI
         }
         public bool ShouldSerializeRefundable() { return false; }
 
-        [Newtonsoft.Json.JsonProperty]
+        [JsonProperty(PropertyName = "flags")]
         private Flags Flags { get; set; }
         public bool ShouldSerializeFlags() { return false; }
+
+        [JsonProperty(PropertyName = "refundAddressRequestPending")]
+        public bool RefundAddressRequestPending { get; set; }
+
+        [JsonProperty(PropertyName = "paymentSubtotals")]
+        public Dictionary<string, long> PaymentSubtotals { get; set; }
+
+        [JsonProperty(PropertyName = "paymentTotals")]
+        public Dictionary<string, long> PaymentTotals { get; set; }
+
+        [JsonProperty(PropertyName = "exchangeRates")]
+        public ExchangeRates ExchangeRates { get; set; }
+
+        [JsonProperty(PropertyName = "supportedTransactionCurrencies")]
+        public Dictionary<string, SupportedTransactionCurrency> SupportedTransactionCurrencies { get; set; }
+
+        [JsonProperty(PropertyName = "minerFees")]
+        public Dictionary<string, MinerFee> MinerFees { get; set; }
+
+        [JsonProperty(PropertyName = "paymentCodes")]
+        public Dictionary<string, Dictionary<string, string>> PaymentCodes { get; set; }
+
+        [JsonProperty(PropertyName = "lowFeeDetected")]
+        public bool LowFeeDetected { get; set; }
+
+        [JsonProperty(PropertyName = "amountPaid")]
+        public long AmountPaid { get; set; }
+
+        [JsonProperty(PropertyName = "buyerProvidedInfo")]
+        public BuyerProvidedInfo BuyerProvidedInfo { get; set; }
+
+        [JsonProperty(PropertyName = "transactionCurrency")]
+        public string TransactionCurrency { get; set; }
+
+        [JsonProperty(PropertyName = "refundInfo")]
+        public RefundInfo RefundInfo { get; set; }
+
+        [JsonProperty(PropertyName = "refundAddresses")]
+        public Dictionary<string, RefundAddress>[] RefundAddresses { get; set; }
+
+        [JsonProperty(PropertyName = "buyerProvidedEmail")]
+        public string BuyerProvidedEmail { get; set; }
+
+        [JsonProperty(PropertyName = "creditedOverpaymentAmounts")]
+        public Dictionary<string, long> CreditedOverpaymentAmounts { get; set; }
+    }
+
+    public partial class ExchangeRates
+    {
+        [JsonProperty(PropertyName = "BTC")]
+        public Dictionary<string, double> Btc { get; set; }
+
+        [JsonProperty(PropertyName = "BCH")]
+        public Dictionary<string, double> Bch { get; set; }
+    }
+
+    public partial class BuyerProvidedInfo
+    {
+        [JsonProperty(PropertyName = "selectedTransactionCurrency")]
+        public string SelectedTransactionCurrency { get; set; }
+
+        [JsonProperty(PropertyName = "emailAddress")]
+        public string EmailAddress { get; set; }
+    }
+
+    public partial class RefundAddress
+    {
+        [JsonProperty(PropertyName = "type")]
+        public string Type { get; set; }
+
+        [JsonProperty(PropertyName = "date")]
+        public DateTimeOffset Date { get; set; }
+    }
+
+    public partial class MinerFee
+    {
+        [JsonProperty(PropertyName = "satoshisPerByte")]
+        public double SatoshisPerByte { get; set; }
+
+        [JsonProperty(PropertyName = "totalFee")]
+        public long TotalFee { get; set; }
+    }
+
+    public partial class SupportedTransactionCurrency
+    {
+        [JsonProperty(PropertyName = "enabled")]
+        public bool Enabled { get; set; }
     }
 
     class Flags
     {
+        [JsonProperty(PropertyName = "refundable")]
         public bool Refundable { get; set; }
     }
 }
