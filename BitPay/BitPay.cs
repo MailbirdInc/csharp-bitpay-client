@@ -585,7 +585,7 @@ namespace BitPayAPI
         {
             try
             {
-                var bodyContent = new StringContent(this.unicodeToAscii(json));
+                var bodyContent = new StringContent(json);
                 _httpClient.DefaultRequestHeaders.Clear();
                 _httpClient.DefaultRequestHeaders.Add("x-accept-version", BITPAY_API_VERSION);
                 _httpClient.DefaultRequestHeaders.Add("x-bitpay-plugin-info", BITPAY_PLUGIN_INFO);
